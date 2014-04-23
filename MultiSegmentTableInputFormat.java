@@ -37,6 +37,7 @@ import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
 import org.apache.hadoop.hbase.mapreduce.TableInputFormatBase;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.util.Base64;
+import org.xerial.snappy.Snappy;
 
 /**
  * Convert HBase tabular data into a format that is consumable by Map/Reduce.
@@ -75,6 +76,8 @@ implements Configurable {
   public static final String SCAN_CACHEBLOCKS = "hbase.mapreduce.scan.cacheblocks";
   /** The number of rows for caching that will be passed to scanners. */
   public static final String SCAN_CACHEDROWS = "hbase.mapreduce.scan.cachedrows";
+  /** Is Scan compressed? or not? */
+  public static final String IS_ZIPPED_SCAN = "hbase.mapreduce.scan.is.zipped";
 
   /** The configuration. */
   private Configuration conf = null;
@@ -106,11 +109,16 @@ implements Configurable {
 
     if (conf.get(SCAN_COUNT) != null) {
       try {
+        boolean isZippedScan = conf.getBoolean(IS_ZIPPED_SCAN, false);
         int scanCount = Integer.parseInt(conf.get(MultiSegmentTableInputFormat.SCAN_COUNT));
         this.scans = new Scan[scanCount];
         for (int i = 0; i < scanCount; i++) {
-          scans[i] = TableMapReduceUtil.convertStringToScan(
-                    conf.get(SCAN + "." + Integer.toString(i)));
+          if (isZippedScan) {
+            scans[i] = convertZippedStringToScan(conf.get(SCAN + "." + Integer.toString(i)));
+          }
+          else {
+            scans[i] = convertStringToScan(conf.get(SCAN + "." + Integer.toString(i)));
+          }
         }
       } catch (IOException e) {
         LOG.error("An error occurred.", e);
@@ -165,6 +173,40 @@ implements Configurable {
    */
   static Scan convertStringToScan(String base64) throws IOException {
     ByteArrayInputStream bis = new ByteArrayInputStream(Base64.decode(base64));
+    DataInputStream dis = new DataInputStream(bis);
+    Scan scan = new Scan();
+    scan.readFields(dis);
+    IOUtils.closeQuietly(dis);
+    return scan;
+  }
+
+  /**
+   * Writes the given scan into a Base64 encoded string.
+   *
+   * @param scan  The scan to write out.
+   * @return The scan saved in a Base64 encoded string.
+   * @throws IOException When writing the scan fails.
+   */
+  public static String convertScanToZippedString(Scan scan) throws IOException {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    DataOutputStream dos = new DataOutputStream(out);
+    scan.write(dos);
+    IOUtils.closeQuietly(dos);
+
+    byte[] compressedScan = Snappy.compress(out.toByteArray());
+    return Base64.encodeBytes(compressedScan);
+  }
+
+  /**
+   * Converts the given Base64 string back into a Scan instance.
+   *
+   * @param base64  The scan details.
+   * @return The newly created Scan instance.
+   * @throws IOException When reading the scan instance fails.
+   */
+  static Scan convertZippedStringToScan(String base64) throws IOException {
+    byte[] uncompressedScan = Snappy.uncompress(Base64.decode(base64));
+    ByteArrayInputStream bis = new ByteArrayInputStream(uncompressedScan);
     DataInputStream dis = new DataInputStream(bis);
     Scan scan = new Scan();
     scan.readFields(dis);
