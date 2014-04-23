@@ -19,7 +19,7 @@
  */
 package org.apache.hadoop.hbase.mapreduce;
 
-import java.io.IOException;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,6 +32,11 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.util.StringUtils;
+import org.apache.commons.io.IOUtils;
+import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
+import org.apache.hadoop.hbase.mapreduce.TableInputFormatBase;
+import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
+import org.apache.hadoop.hbase.util.Base64;
 
 /**
  * Convert HBase tabular data into a format that is consumable by Map/Reduce.
@@ -135,5 +140,36 @@ implements Configurable {
      }
      return splits;
   }
-  
+
+  /**
+   * Writes the given scan into a Base64 encoded string.
+   *
+   * @param scan  The scan to write out.
+   * @return The scan saved in a Base64 encoded string.
+   * @throws IOException When writing the scan fails.
+   */
+  public static String convertScanToString(Scan scan) throws IOException {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    DataOutputStream dos = new DataOutputStream(out);
+    scan.write(dos);
+    IOUtils.closeQuietly(dos);
+    return Base64.encodeBytes(out.toByteArray());
+  }
+
+  /**
+   * Converts the given Base64 string back into a Scan instance.
+   *
+   * @param base64  The scan details.
+   * @return The newly created Scan instance.
+   * @throws IOException When reading the scan instance fails.
+   */
+  static Scan convertStringToScan(String base64) throws IOException {
+    ByteArrayInputStream bis = new ByteArrayInputStream(Base64.decode(base64));
+    DataInputStream dis = new DataInputStream(bis);
+    Scan scan = new Scan();
+    scan.readFields(dis);
+    IOUtils.closeQuietly(dis);
+    return scan;
+  }
 }
+
